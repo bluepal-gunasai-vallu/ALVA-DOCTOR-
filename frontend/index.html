@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+<meta charset="UTF-8">
+<title>ALVA Voice Appointment Assistant</title>
+
+<style>
+
+body{
+font-family:Arial;
+text-align:center;
+margin-top:80px;
+background:#f4f6f9;
+}
+
+h2{
+margin-bottom:30px;
+}
+
+button{
+padding:12px 20px;
+font-size:16px;
+border-radius:8px;
+border:none;
+background:#4CAF50;
+color:white;
+cursor:pointer;
+}
+
+button:hover{
+background:#45a049;
+}
+
+#status{
+margin-top:15px;
+color:gray;
+font-size:16px;
+}
+
+#output{
+margin-top:40px;
+font-size:20px;
+font-weight:bold;
+}
+
+</style>
+
+</head>
+
+
+<body>
+
+<h2>🎤 ALVA Voice Appointment Assistant</h2>
+
+<button onclick="startConversation()">Start Conversation</button>
+
+<p id="status">Status: Not Listening</p>
+
+<p id="output"></p>
+
+
+<script>
+
+let sessionId="user127"
+
+let socket=new WebSocket(`ws://localhost:9001/ws/${sessionId}`)
+
+let recognition
+let isSpeaking=false
+
+
+// -----------------------------
+// WebSocket connected
+// -----------------------------
+
+socket.onopen=function(){
+
+console.log("WebSocket connected")
+
+}
+
+
+// -----------------------------
+// Receive messages from backend
+// -----------------------------
+
+socket.onmessage=function(event){
+
+const data=JSON.parse(event.data)
+
+if(data.type==="assistant_reply"){
+
+const reply=data.text
+
+document.getElementById("output").innerText="Assistant: "+reply
+
+speakText(reply)
+
+}
+
+if(data.type==="voice_notification"){
+
+const msg=data.text
+
+document.getElementById("output").innerText=msg
+
+// activate feedback mode
+if(data.mode==="feedback"){
+
+if(socket.readyState===WebSocket.OPEN){
+
+socket.send("__feedback_mode__")
+
+}
+
+}
+
+speakText(msg)
+
+}
+
+}
+
+
+// -----------------------------
+// Speech synthesis
+// -----------------------------
+
+function speakText(text){
+
+if(!text) return
+
+speechSynthesis.cancel()
+
+const utterance = new SpeechSynthesisUtterance(text)
+
+utterance.lang="en-IN"
+utterance.rate=1
+utterance.pitch=1
+
+isSpeaking=true
+
+console.log("Assistant speaking:",text)
+
+// stop microphone while speaking
+if(recognition){
+try{
+recognition.stop()
+}catch(e){}
+}
+
+utterance.onend=function(){
+
+console.log("Speech finished")
+
+isSpeaking=false
+
+document.getElementById("status").innerText="Status: Listening..."
+
+setTimeout(()=>{
+startListening()
+},300)
+
+}
+
+speechSynthesis.speak(utterance)
+
+}
+// -----------------------------
+// Start conversation
+// -----------------------------
+
+function startConversation(){
+
+if(!('webkitSpeechRecognition' in window)){
+
+alert("Please use Google Chrome")
+
+return
+
+}
+
+recognition=new webkitSpeechRecognition()
+
+recognition.lang="en-IN"
+
+recognition.interimResults=false
+
+recognition.continuous=true
+
+
+recognition.onstart=function(){
+
+document.getElementById("status").innerText="Status: Listening..."
+
+}
+
+
+recognition.onresult=function(event){
+
+if(isSpeaking) return
+
+const transcript=event.results[event.results.length-1][0].transcript
+
+console.log("User:",transcript)
+
+document.getElementById("output").innerText="You: "+transcript
+
+document.getElementById("status").innerText="Processing..."
+
+try{
+recognition.stop()
+}catch(e){}
+
+if(socket.readyState===WebSocket.OPEN){
+
+socket.send(transcript)
+
+}
+
+}
+
+
+recognition.onerror=function(event){
+
+console.log("Speech error:",event.error)
+
+}
+
+
+recognition.onend=function(){
+
+if(!isSpeaking){
+
+startListening()
+
+}
+
+}
+
+
+startListening()
+
+}
+
+
+// -----------------------------
+// Start listening safely
+// -----------------------------
+
+function startListening(){
+
+if(!recognition || isSpeaking) return
+
+try{
+
+recognition.start()
+
+}catch(e){
+
+console.log("Recognition already started")
+
+}
+
+}
+
+
+// -----------------------------
+// Auto start microphone
+// -----------------------------
+
+// window.onload=function(){
+
+// startConversation()
+
+// }
+
+</script>
+
+
+</body>
+</html>

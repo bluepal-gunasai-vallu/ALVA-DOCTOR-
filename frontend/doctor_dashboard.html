@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+<title>ALVA Doctor Dashboard</title>
+
+<style>
+
+body{
+font-family:Arial;
+background:#f4f6f9;
+padding:20px;
+}
+
+.cards{
+display:flex;
+gap:20px;
+margin-bottom:30px;
+}
+
+.card{
+flex:1;
+background:white;
+padding:20px;
+border-radius:10px;
+text-align:center;
+}
+
+table{
+width:100%;
+background:white;
+border-collapse:collapse;
+}
+
+th,td{
+padding:10px;
+border:1px solid #ddd;
+text-align:center;
+}
+
+th{
+background:#1976d2;
+color:white;
+}
+
+button{
+padding:6px 10px;
+cursor:pointer;
+border:none;
+background:#1976d2;
+color:white;
+border-radius:4px;
+}
+
+button:hover{
+background:#125aa0;
+}
+
+.calendar{
+margin-top:40px;
+background:white;
+padding:10px;
+border-radius:10px;
+}
+
+.schedule-box{
+background:white;
+padding:15px;
+border-radius:10px;
+margin-bottom:20px;
+}
+
+.schedule-box input,
+.schedule-box select{
+padding:6px;
+margin-right:10px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<h1>🏥 ALVA Doctor Dashboard</h1>
+
+
+<div class="cards">
+
+<div class="card">
+<h3>Total</h3>
+<p id="total">0</p>
+</div>
+
+<div class="card">
+<h3>Confirmed</h3>
+<p id="confirmed">0</p>
+</div>
+
+<div class="card">
+<h3>Cancelled</h3>
+<p id="cancelled">0</p>
+</div>
+
+<div class="card">
+<h3>Today</h3>
+<p id="today">0</p>
+</div>
+
+</div>
+
+
+<div class="schedule-box">
+
+<h2>Doctor Schedule</h2>
+
+<label>Date</label>
+<input type="date" id="date">
+
+<label>Start Time</label>
+<input type="time" id="start_time">
+
+<label>End Time</label>
+<input type="time" id="end_time">
+
+<select id="status" onchange="handleStatusChange()">
+<option value="BUSY">Busy</option>
+<option value="LEAVE">Leave</option>
+</select>
+
+<button onclick="updateAvailability()">Update</button>
+
+</div>
+
+<hr>
+
+
+<h2>Appointments (Database)</h2>
+
+<table>
+
+<thead>
+<tr>
+<th>ID</th>
+<th>Name</th>
+<th>Email</th>
+<th>Service</th>
+<th>Date</th>
+<th>Status</th>
+<th>Action</th>
+</tr>
+</thead>
+
+<tbody id="table"></tbody>
+
+</table>
+
+
+<div class="calendar">
+
+<h2>Google Calendar</h2>
+
+<iframe
+src="https://calendar.google.com/calendar/embed?src=vallugunasai05%40gmail.com&ctz=Asia%2FKolkata"
+style="border:0"
+width="100%"
+height="600">
+</iframe>
+
+</div>
+
+
+<script>
+
+
+async function loadAppointments(){
+
+const res = await fetch("/doctor/appointments")
+
+const data = await res.json()
+
+const table = document.getElementById("table")
+
+table.innerHTML=""
+
+let total = data.length
+let confirmed=0
+let cancelled=0
+let today=0
+
+const todayDate = new Date().toISOString().slice(0,10)
+
+data.forEach(a=>{
+
+if(a.state==="CONFIRMED") confirmed++
+if(a.state==="CANCELLED") cancelled++
+
+if(a.date_time.startsWith(todayDate)) today++
+
+table.innerHTML += `
+<tr>
+<td>${a.id}</td>
+<td>${a.name}</td>
+<td>${a.email}</td>
+<td>${a.service}</td>
+<td>${a.date_time}</td>
+<td>${a.state}</td>
+<td>
+
+<button onclick="updateStatus(${a.id},'CONFIRMED')">
+Confirm
+</button>
+
+<button onclick="updateStatus(${a.id},'CANCELLED')">
+Cancel
+</button>
+
+<button onclick="sendReminder()">
+Reminder
+</button>
+
+<button onclick="sendFeedback()">
+Feedback
+</button>
+
+</td>
+</tr>
+`
+
+})
+
+document.getElementById("total").innerText = total
+document.getElementById("confirmed").innerText = confirmed
+document.getElementById("cancelled").innerText = cancelled
+document.getElementById("today").innerText = today
+
+}
+
+
+
+async function updateStatus(id,status){
+
+await fetch(`/doctor/appointments/${id}?status=${status}`,{
+method:"PUT"
+})
+
+loadAppointments()
+
+}
+
+
+
+function handleStatusChange(){
+
+const status = document.getElementById("status").value
+const start = document.getElementById("start_time")
+const end = document.getElementById("end_time")
+
+if(status === "LEAVE"){
+
+start.disabled = true
+end.disabled = true
+
+start.value = ""
+end.value = ""
+
+}else{
+
+start.disabled = false
+end.disabled = false
+
+}
+
+}
+
+
+
+async function updateAvailability(){
+
+const date = document.getElementById("date").value
+let start = document.getElementById("start_time").value
+let end = document.getElementById("end_time").value
+const status = document.getElementById("status").value
+
+if(!date){
+alert("Please select date")
+return
+}
+
+if(status === "LEAVE"){
+start = ""
+end = ""
+}
+
+await fetch(`/doctor/availability?date=${date}&start_time=${start}&end_time=${end}&status=${status}`,{
+method:"POST"
+})
+
+alert("Doctor schedule updated")
+
+}
+
+
+
+async function sendReminder(){
+
+await fetch("/doctor/reminder",{method:"POST"})
+
+alert("Reminder sent")
+
+}
+
+
+
+async function sendFeedback(){
+
+await fetch("/doctor/feedback",{method:"POST"})
+
+alert("Feedback request sent")
+
+}
+
+
+loadAppointments()
+
+</script>
+
+</body>
+</html>
