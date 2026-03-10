@@ -61,10 +61,13 @@ async def send_reminder():
 # ---------------- FEEDBACK ---------------- #
 
 @router.post("/doctor/feedback")
-async def ask_feedback():
+async def ask_feedback(id:int,email:str):
+
+    from backend.socket_manager import send_voice_message
 
     await send_voice_message(
-        "Please share your feedback about your appointment."
-    )
+    f"Hello {email}. How was your appointment today? Please tell us about your experience.",
+    email
+)
 
     return {"message": "Feedback request sent"}

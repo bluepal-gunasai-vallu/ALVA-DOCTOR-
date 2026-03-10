@@ -1,10 +1,11 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-
+from backend.socket_manager import connections
 from backend.session_store import get_session, save_session
 from backend.nlu import extract_nlu
-from backend.dialogue_manager import generate_reply
+from backend.dialogue_manager import generate_reply, feedback
+from backend.db import get_last_appointment_by_email
 
 from backend.db import (
     create_appointment,
@@ -13,7 +14,8 @@ from backend.db import (
     get_all_appointments,
     update_appointment_datetime,
     update_google_event_id,
-    is_doctor_on_leave
+    is_doctor_on_leave,
+    save_feedback
 )
 
 from backend.fsm import AppointmentStateMachine
@@ -24,7 +26,6 @@ from backend.google_calendar import (
 )
 
 from backend.doctor_routes import router as doctor_router
-
 import uuid
 import dateparser
 from datetime import datetime, timedelta
@@ -39,6 +40,10 @@ app.include_router(doctor_router)
 @app.get("/")
 def home():
     return FileResponse("frontend/index.html")
+
+# @app.get("/")
+# def home():
+#     return FileResponse("frontend/doctor_dashboard.html")    
 
 
 # -----------------------------
@@ -65,6 +70,7 @@ def normalize_datetime(date_str, time_str):
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
     await websocket.accept()
+    connections.append(websocket)
 
     appointment_id = str(uuid.uuid4())
 
@@ -81,6 +87,71 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
             session = get_session(session_id)
 
+            # -------------------------------------------------
+            # RECEIVE EMAIL FROM FRONTEND (FEEDBACK FIX)
+            # -------------------------------------------------
+            if text.startswith("__feedback_email__:"):
+                email = text.replace("__feedback_email__:", "")
+                session["feedback_email"] = email
+                save_session(session_id, session)
+                continue
+
+
+            # ---------------------------
+            # ACTIVATE FEEDBACK MODE
+            # ---------------------------
+            if text == "__feedback_mode__":
+
+                session["feedback_mode"] = True
+
+                # email already sent from frontend
+                save_session(session_id, session)
+
+                # DO NOT call AI here
+                continue
+
+
+            # ---------------------------
+            # FEEDBACK MODE HANDLING
+            # ---------------------------
+
+            if session.get("feedback_mode"):
+
+                user_feedback = text.strip()
+
+                email = session.get("feedback_email")
+
+                name = None
+
+                # fetch name from appointment
+                if email:
+                    appointment = get_last_appointment_by_email(email)
+                    if appointment:
+                        name = appointment["name"]
+
+                save_feedback(
+                    name,
+                    email,
+                    user_feedback
+                )
+
+                # sess
+                # on["feedback_mode"] = False
+                # save_session(session_id, session)
+
+                reply = "Thank you for sharing your experience. Your feedback helps us improve."
+
+                await websocket.send_json({
+                    "type": "assistant_reply",
+                    "text": reply,
+                    "state": state_machine.get_state()
+                })
+
+                continue
+            # ---------------------------
+            # NORMAL NLU PROCESSING
+            # ---------------------------
+
             nlu = extract_nlu(text)
 
             # update slots
@@ -91,6 +162,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             save_session(session_id, session)
 
             required = ["service", "date", "time", "name", "email"]
+
 
             # ---------------------------
             # CHECK AVAILABILITY
@@ -103,7 +175,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 parsed_date = dateparser.parse(date)
                 formatted_date = parsed_date.strftime("%Y-%m-%d")
 
-                # 🚫 Check doctor leave first
                 if is_doctor_on_leave(formatted_date):
 
                     reply = "Doctor is on leave that day. Please choose another date."
@@ -125,6 +196,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
                 continue
 
+
             # ---------------------------
             # MOVE TO TENTATIVE
             # ---------------------------
@@ -138,6 +210,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         metadata={"reason": "user_provided_details"}
                     )
 
+
             # ---------------------------
             # CONFIRM BOOKING
             # ---------------------------
@@ -150,6 +223,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         "CONFIRMED",
                         metadata={"reason": "user_confirmed"}
                     )
+
 
             # ---------------------------
             # SAVE APPOINTMENT
@@ -168,7 +242,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
                 parsed_time = dateparser.parse(time).strftime("%H:%M:%S")
 
-                # 🚫 Doctor leave check
                 if is_doctor_on_leave(formatted_date):
 
                     await websocket.send_json({
@@ -179,7 +252,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
                     continue
 
-                # 🔍 Check busy time
                 conflict = check_doctor_time_conflict(
                     formatted_date,
                     parsed_time
@@ -199,9 +271,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
                     continue
 
-                # ---------------------------
-                # BOOK APPOINTMENT
-                # ---------------------------
 
                 normalized_datetime = normalize_datetime(date, time)
 
@@ -241,6 +310,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 })
 
                 continue
+
 
             # ---------------------------
             # CANCEL APPOINTMENT
@@ -291,6 +361,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
                 continue
 
+
             # ---------------------------
             # RESCHEDULE REQUEST
             # ---------------------------
@@ -311,6 +382,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 })
 
                 continue
+
 
             # ---------------------------
             # RESCHEDULE FLOW
@@ -386,6 +458,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
                 continue
 
+
             # ---------------------------
             # DEFAULT AI REPLY
             # ---------------------------
@@ -398,6 +471,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 "state": state_machine.get_state()
             })
 
-    except WebSocketDisconnect:
 
-        print("Client disconnected:", session_id)
+    except WebSocketDisconnect:
+         if websocket in connections:
+            connections.remove(websocket)
+
+         print("Client disconnected:", session_id)

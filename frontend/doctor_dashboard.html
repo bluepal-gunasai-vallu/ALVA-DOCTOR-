@@ -219,7 +219,7 @@ Cancel
 Reminder
 </button>
 
-<button onclick="sendFeedback()">
+<button onclick="sendFeedback(${a.id},'${a.email}')">
 Feedback
 </button>
 
@@ -311,10 +311,11 @@ alert("Reminder sent")
 }
 
 
+async function sendFeedback(id,email){
 
-async function sendFeedback(){
-
-await fetch("/doctor/feedback",{method:"POST"})
+await fetch(`/doctor/feedback?id=${id}&email=${email}`,{
+method:"POST"
+})
 
 alert("Feedback request sent")
 

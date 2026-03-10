@@ -38,11 +38,7 @@ def get_all_appointments():
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
 
-    cursor.execute("""
-        SELECT * FROM appointments
-        WHERE date_time >= NOW()
-        ORDER BY date_time ASC
-    """)
+    cursor.execute("SELECT * FROM appointments ORDER BY date_time DESC")
 
     data = cursor.fetchall()
 
@@ -201,23 +197,22 @@ def check_doctor_time_conflict(date, time):
     return None
 # ---------------- FEEDBACK ---------------- #
 
-def save_feedback(message):
+def save_feedback(name, email, message):
 
     conn = get_connection()
     cursor = conn.cursor()
 
     sql = """
-    INSERT INTO feedback (message)
-    VALUES (%s)
+    INSERT INTO feedback (name, email, message)
+    VALUES (%s, %s, %s)
     """
 
-    cursor.execute(sql, (message,))
+    cursor.execute(sql, (name, email, message))
 
     conn.commit()
 
     cursor.close()
     conn.close()
-
 def is_doctor_on_leave(date):
 
     conn = get_connection()

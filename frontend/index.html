@@ -48,7 +48,6 @@ font-weight:bold;
 
 </head>
 
-
 <body>
 
 <h2>🎤 ALVA Voice Appointment Assistant</h2>
@@ -59,8 +58,12 @@ font-weight:bold;
 
 <p id="output"></p>
 
-
 <script>
+
+// load voices
+speechSynthesis.onvoiceschanged = function(){
+speechSynthesis.getVoices()
+}
 
 let sessionId="user127"
 
@@ -91,37 +94,38 @@ const data=JSON.parse(event.data)
 
 if(data.type==="assistant_reply"){
 
-const reply=data.text
+    const reply=data.text
 
-document.getElementById("output").innerText="Assistant: "+reply
+    document.getElementById("output").innerHTML += "<br><b>Assistant:</b> " + reply
 
-speakText(reply)
-
+    // speak reply
+    speakText(reply)
 }
+
 
 if(data.type==="voice_notification"){
 
-const msg=data.text
+    const msg=data.text
 
-document.getElementById("output").innerText=msg
+    document.getElementById("output").innerHTML += "<br><b>Assistant:</b> " + msg
 
-// activate feedback mode
-if(data.mode==="feedback"){
+    // speak notification
+    speakText(msg)
 
-if(socket.readyState===WebSocket.OPEN){
+    // activate feedback mode
+    if(data.mode==="feedback"){
 
-socket.send("__feedback_mode__")
+        if(data.email){
+            socket.send("__feedback_email__:"+data.email)
+        }
 
+        setTimeout(()=>{
+            socket.send("__feedback_mode__")
+        },100)
+    }
 }
 
 }
-
-speakText(msg)
-
-}
-
-}
-
 
 // -----------------------------
 // Speech synthesis
@@ -135,19 +139,34 @@ speechSynthesis.cancel()
 
 const utterance = new SpeechSynthesisUtterance(text)
 
-utterance.lang="en-IN"
+const voices = speechSynthesis.getVoices()
+
+if(voices.length > 0){
+
+const englishVoice = voices.find(v => v.lang.includes("en"))
+
+utterance.voice = englishVoice || voices[0]
+
+}
+
+utterance.lang="en-US"
 utterance.rate=1
 utterance.pitch=1
+utterance.volume=1
 
 isSpeaking=true
+
+document.getElementById("status").innerText="Assistant Speaking..."
 
 console.log("Assistant speaking:",text)
 
 // stop microphone while speaking
 if(recognition){
+
 try{
 recognition.stop()
 }catch(e){}
+
 }
 
 utterance.onend=function(){
@@ -159,14 +178,18 @@ isSpeaking=false
 document.getElementById("status").innerText="Status: Listening..."
 
 setTimeout(()=>{
+
 startListening()
-},300)
+
+},500)
 
 }
 
 speechSynthesis.speak(utterance)
 
 }
+
+
 // -----------------------------
 // Start conversation
 // -----------------------------
@@ -197,6 +220,10 @@ document.getElementById("status").innerText="Status: Listening..."
 }
 
 
+// -----------------------------
+// Capture voice input
+// -----------------------------
+
 recognition.onresult=function(event){
 
 if(isSpeaking) return
@@ -205,7 +232,8 @@ const transcript=event.results[event.results.length-1][0].transcript
 
 console.log("User:",transcript)
 
-document.getElementById("output").innerText="You: "+transcript
+// document.getElementById("output").innerText="You: "+transcript
+document.getElementById("output").innerHTML += "<br><b>You:</b> " + transcript
 
 document.getElementById("status").innerText="Processing..."
 
@@ -222,36 +250,53 @@ socket.send(transcript)
 }
 
 
+// -----------------------------
+// Handle errors
+// -----------------------------
+
 recognition.onerror=function(event){
 
 console.log("Speech error:",event.error)
 
+if(event.error==="aborted") return
+
 }
 
+
+// -----------------------------
+// Restart listening safely
+// -----------------------------
 
 recognition.onend=function(){
 
 if(!isSpeaking){
 
+setTimeout(()=>{
+
 startListening()
 
-}
+},500)
 
 }
 
+}
 
+
+// start listening first time
 startListening()
 
 }
 
 
 // -----------------------------
-// Start listening safely
+// Safe listening start
 // -----------------------------
 
 function startListening(){
 
-if(!recognition || isSpeaking) return
+if(!recognition) return
+
+if(isSpeaking) return
 
 try{
 
@@ -259,25 +304,13 @@ recognition.start()
 
 }catch(e){
 
-console.log("Recognition already started")
+console.log("Recognition restart prevented")
 
 }
 
 }
-
-
-// -----------------------------
-// Auto start microphone
-// -----------------------------
-
-// window.onload=function(){
-
-// startConversation()
-
-// }
 
 </script>
-
 
 </body>
 </html>
