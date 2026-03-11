@@ -53,6 +53,9 @@ font-weight:bold;
 <h2>🎤 ALVA Voice Appointment Assistant</h2>
 
 <button onclick="startConversation()">Start Conversation</button>
+<button onclick="endConversation()" style="background:#e53935;margin-left:10px;">
+End Conversation
+</button>
 
 <p id="status">Status: Not Listening</p>
 
@@ -266,10 +269,11 @@ if(event.error==="aborted") return
 // -----------------------------
 // Restart listening safely
 // -----------------------------
+let conversationEnded=false
 
 recognition.onend=function(){
 
-if(!isSpeaking){
+if(!isSpeaking && !conversationEnded){
 
 setTimeout(()=>{
 
@@ -310,6 +314,28 @@ console.log("Recognition restart prevented")
 
 }
 
+// -----------------------------
+// End conversation
+// -----------------------------
+function endConversation(){
+
+conversationEnded=true
+
+speechSynthesis.cancel()
+
+if(recognition){
+try{
+recognition.stop()
+}catch(e){}
+}
+
+if(socket && socket.readyState === WebSocket.OPEN){
+socket.close()
+}
+
+document.getElementById("status").innerText="Conversation Ended"
+
+}
 </script>
 
 </body>
