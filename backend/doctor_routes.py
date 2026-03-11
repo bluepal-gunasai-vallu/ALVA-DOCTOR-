@@ -49,13 +49,22 @@ def get_availability():
 # ---------------- REMINDER ---------------- #
 
 @router.post("/doctor/reminder")
-async def send_reminder():
+async def send_reminder(id:int,email:str):
 
-    await send_voice_message(
-        "Reminder. Your appointment is scheduled soon."
-    )
+    appointments = get_all_appointments()
 
-    return {"message": "Reminder sent"}
+    for a in appointments:
+        if a["id"] == id:
+
+            date_time = a["date_time"]
+
+            message = f"Reminder. Your appointment is scheduled on {date_time}. You can reschedule or cancel if needed."
+
+            await send_voice_message(message,email)
+
+            break
+
+    return {"message":"Reminder sent"}
 
 
 # ---------------- FEEDBACK ---------------- #

@@ -60,6 +60,10 @@ def normalize_datetime(date_str, time_str):
     if not parsed:
         return None
 
+    # 🚫 block past time
+    if parsed < datetime.now():
+        return "PAST_TIME"
+
     return parsed.strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -117,37 +121,42 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
             if session.get("feedback_mode"):
 
-                user_feedback = text.strip()
+                # check if user is trying to reschedule/cancel instead of feedback
+                nlu = extract_nlu(text)
 
-                email = session.get("feedback_email")
+                if nlu.get("intent") in ["reschedule","cancel","confirm","confirm"]:
 
-                name = None
+                    # exit feedback mode
+                    session["feedback_mode"] = False
+                    save_session(session_id, session)
 
-                # fetch name from appointment
-                if email:
-                    appointment = get_last_appointment_by_email(email)
-                    if appointment:
-                        name = appointment["name"]
+                else:
 
-                save_feedback(
-                    name,
-                    email,
-                    user_feedback
-                )
+                    user_feedback = text.strip()
 
-                # sess
-                # on["feedback_mode"] = False
-                # save_session(session_id, session)
+                    email = session.get("feedback_email")
 
-                reply = "Thank you for sharing your experience. Your feedback helps us improve."
+                    name = None
 
-                await websocket.send_json({
-                    "type": "assistant_reply",
-                    "text": reply,
-                    "state": state_machine.get_state()
-                })
+                    if email:
+                        appointment = get_last_appointment_by_email(email)
+                        if appointment:
+                            name = appointment["name"]
 
-                continue
+                    save_feedback(name,email,user_feedback)
+
+                    session["feedback_mode"] = False
+                    save_session(session_id, session)
+
+                    reply = "Thank you for sharing your experience. Your feedback helps us improve."
+
+                    await websocket.send_json({
+                        "type": "assistant_reply",
+                        "text": reply,
+                        "state": state_machine.get_state()
+                    })
+
+                    continue
             # ---------------------------
             # NORMAL NLU PROCESSING
             # ---------------------------
@@ -156,9 +165,22 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
             # update slots
             for key, value in nlu.items():
-                if value:
+
+                if not value:
+                    continue
+
+                if key == "time":
+
+                    parsed_time = dateparser.parse(str(value))
+
+                    if parsed_time:
+                        session["slots"]["time"] = parsed_time.strftime("%H:%M")
+                        print("TIME DETECTED:", session["slots"]["time"])
+
+                else:
                     session["slots"][key] = value
 
+            print("CURRENT SESSION SLOTS:", session["slots"])
             save_session(session_id, session)
 
             required = ["service", "date", "time", "name", "email"]
@@ -215,7 +237,43 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             # CONFIRM BOOKING
             # ---------------------------
 
+            # ---------------------------
+            # CONFIRM ACTION
+            # ---------------------------
+
             if nlu.get("intent") == "confirm":
+
+                # cancel confirmation
+                if session.get("cancel_confirm"):
+
+                    email = session["slots"].get("email")
+                    appointments = get_all_appointments()
+
+                    for a in appointments:
+
+                        if a["email"] == email and a["state"] in ["CONFIRMED", "MODIFIED"]:
+
+                            if a.get("google_event_id"):
+                                try:
+                                    delete_event(a["google_event_id"])
+                                except Exception as e:
+                                    print("Calendar delete skipped:", e)
+
+                            update_appointment_status(a["id"], "CANCELLED")
+
+                            session["cancel_confirm"] = False
+                            save_session(session_id, session)
+
+                            await websocket.send_json({
+                                "type": "assistant_reply",
+                                "text": "Your appointment has been cancelled.",
+                                "state": state_machine.get_state()
+                            })
+
+                            continue
+
+            # booking confirmation (only if not rescheduling)
+            if nlu.get("intent") == "confirm" and not session.get("reschedule_mode"):
 
                 if all(session["slots"].get(k) for k in required):
 
@@ -223,7 +281,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         "CONFIRMED",
                         metadata={"reason": "user_confirmed"}
                     )
-
 
             # ---------------------------
             # SAVE APPOINTMENT
@@ -273,6 +330,18 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
 
                 normalized_datetime = normalize_datetime(date, time)
+               
+                # 🚫 Prevent past booking
+                if normalized_datetime == "PAST_TIME":
+
+                    await websocket.send_json({
+                        "type": "assistant_reply",
+                        "text": "You cannot book past date or time. Please choose a future slot.",
+                        "state": state_machine.get_state()
+                    })
+
+                    continue
+
 
                 start_dt = datetime.strptime(
                     normalized_datetime,
@@ -318,46 +387,47 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
             if nlu.get("intent") == "cancel":
 
-                email = session["slots"].get("email")
+                if not session.get("cancel_confirm"):
 
-                appointments = get_all_appointments()
-
-                found = False
-
-                for a in appointments:
-
-                    if a["email"] == email and a["state"] in ["CONFIRMED", "MODIFIED"]:
-
-                        found = True
-
-                        if a.get("google_event_id"):
-                            try:
-                                delete_event(a["google_event_id"])
-                            except Exception as e:
-                                print("Calendar delete skipped:", e)
-
-                        update_appointment_status(a["id"], "CANCELLED")
-
-                        state_machine.transition(
-                            "CANCELLED",
-                            metadata={"reason": "user_cancelled"}
-                        )
-
-                        await websocket.send_json({
-                            "type": "assistant_reply",
-                            "text": "Your appointment has been cancelled.",
-                            "state": state_machine.get_state()
-                        })
-
-                        break
-
-                if not found:
+                    session["cancel_confirm"] = True
+                    save_session(session_id, session)
 
                     await websocket.send_json({
                         "type": "assistant_reply",
-                        "text": "No active appointment found to cancel.",
+                        "text": "Are you sure you want to cancel your appointment?",
                         "state": state_machine.get_state()
                     })
+
+                    continue
+
+                email = session.get("feedback_email") or session["slots"].get("email")
+
+                appointment = get_last_appointment_by_email(email)
+
+                if not appointment:
+
+                    reply = "No active appointment found to cancel."
+
+                else:
+
+                    if appointment.get("google_event_id"):
+                        try:
+                            delete_event(appointment["google_event_id"])
+                        except Exception as e:
+                            print("Calendar delete skipped:", e)
+
+                    update_appointment_status(appointment["id"], "CANCELLED")
+
+                    session["cancel_confirm"] = False
+                    save_session(session_id, session)
+
+                    reply = "Your appointment has been cancelled."
+
+                await websocket.send_json({
+                    "type": "assistant_reply",
+                    "text": reply,
+                    "state": state_machine.get_state()
+                })
 
                 continue
 
@@ -399,19 +469,30 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
                 elif not time:
 
-                    reply = "What time works for you?"
+                    formatted_date = dateparser.parse(date).strftime("%Y-%m-%d")
+
+                    slots = generate_available_slots(formatted_date)
+
+                    reply = f"Available slots are {', '.join(slots)}. Please choose a time like 11 AM or 14:00."
 
                 else:
 
-                    email = session["slots"].get("email")
+                    email = session.get("feedback_email") or session["slots"].get("email")
 
-                    appointments = get_all_appointments()
+                    appointment = get_last_appointment_by_email(email)
 
-                    for a in appointments:
+                    if not appointment:
 
-                        if a["email"] == email and a["state"] in ["CONFIRMED", "MODIFIED"]:
+                        reply = "No active appointment found to reschedule."
 
-                            normalized_datetime = normalize_datetime(date, time)
+                    else:
+
+                        normalized_datetime = normalize_datetime(date, time)
+
+                        if normalized_datetime == "PAST_TIME":
+                            reply = "You cannot reschedule to a past date or time."
+
+                        else:
 
                             start_dt = datetime.strptime(
                                 normalized_datetime,
@@ -420,23 +501,23 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
                             end_dt = start_dt + timedelta(hours=1)
 
-                            if a.get("google_event_id"):
+                            if appointment.get("google_event_id"):
                                 try:
-                                    delete_event(a["google_event_id"])
+                                    delete_event(appointment["google_event_id"])
                                 except Exception as e:
                                     print("Calendar delete skipped:", e)
 
                             event_id = create_event(
                                 start_datetime=start_dt.isoformat(),
                                 end_datetime=end_dt.isoformat(),
-                                summary=f"{a['service']}-{a['name']}",
+                                summary=f"{appointment['service']}-{appointment['name']}",
                                 description="Rescheduled via ALVA",
                                 attendee_email=email
                             )
 
-                            update_appointment_datetime(a["id"], normalized_datetime)
-                            update_google_event_id(a["id"], event_id)
-                            update_appointment_status(a["id"], "MODIFIED")
+                            update_appointment_datetime(appointment["id"], normalized_datetime)
+                            update_google_event_id(appointment["id"], event_id)
+                            update_appointment_status(appointment["id"], "MODIFIED")
 
                             state_machine.transition(
                                 "MODIFIED",
@@ -447,16 +528,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                             save_session(session_id, session)
 
                             reply = "Your appointment has been rescheduled."
+                            await websocket.send_json({
+                                "type": "assistant_reply",
+                                "text": reply,
+                                "state": state_machine.get_state()
+                            })
 
-                            break
-
-                await websocket.send_json({
-                    "type": "assistant_reply",
-                    "text": reply,
-                    "state": state_machine.get_state()
-                })
-
-                continue
+                            continue
 
 
             # ---------------------------

@@ -215,7 +215,7 @@ Confirm
 Cancel
 </button>
 
-<button onclick="sendReminder()">
+<button onclick="sendReminder(${a.id},'${a.email}')">
 Reminder
 </button>
 
@@ -302,9 +302,11 @@ alert("Doctor schedule updated")
 
 
 
-async function sendReminder(){
+async function sendReminder(id,email){
 
-await fetch("/doctor/reminder",{method:"POST"})
+await fetch(`/doctor/reminder?id=${id}&email=${email}`,{
+method:"POST"
+})
 
 alert("Reminder sent")
 
