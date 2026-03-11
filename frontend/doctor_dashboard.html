@@ -288,8 +288,8 @@ return
 }
 
 if(status === "LEAVE"){
-start = ""
-end = ""
+start = "00:00"
+end = "23:59"
 }
 
 await fetch(`/doctor/availability?date=${date}&start_time=${start}&end_time=${end}&status=${status}`,{

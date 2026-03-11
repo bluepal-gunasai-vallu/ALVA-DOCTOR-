@@ -118,8 +118,13 @@ def create_doctor_block(date, start_time, end_time, status):
 
     service = get_calendar_service()
 
-    start_datetime = f"{date}T{start_time}:00+05:30"
-    end_datetime = f"{date}T{end_time}:00+05:30"
+    # if full day leave
+    if status == "LEAVE":
+        start_datetime = f"{date}T00:00:00+05:30"
+        end_datetime = f"{date}T23:59:00+05:30"
+    else:
+        start_datetime = f"{date}T{start_time}:00+05:30"
+        end_datetime = f"{date}T{end_time}:00+05:30"
 
     event = {
         "summary": f"Doctor {status}",
