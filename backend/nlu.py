@@ -3,6 +3,8 @@ import json
 import os
 from dotenv import load_dotenv
 import re
+from datetime import datetime, timedelta
+
 load_dotenv()
 
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
@@ -80,6 +82,84 @@ JSON FORMAT (strict):
   "email": ""
 }
 """
+
+# ---------- RELATIVE DATE PARSER ----------
+def normalize_relative_date(date_text):
+
+    if not date_text:
+        return None
+
+    date_text = date_text.lower().strip()
+    today = datetime.today()
+
+    weekdays = {
+        "monday":0,
+        "tuesday":1,
+        "wednesday":2,
+        "thursday":3,
+        "friday":4,
+        "saturday":5,
+        "sunday":6
+    }
+
+    # tomorrow / next day
+    if date_text in ["tomorrow", "next day"]:
+        return (today + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # day after tomorrow
+    if date_text == "day after tomorrow":
+        return (today + timedelta(days=2)).strftime("%Y-%m-%d")
+
+    # next 3 days
+    if "next 3 days" in date_text:
+        return (today + timedelta(days=3)).strftime("%Y-%m-%d")
+
+    # next week
+    if date_text == "next week":
+        return (today + timedelta(days=7)).strftime("%Y-%m-%d")
+
+    # next month
+    if date_text == "next month":
+        month = today.month + 1 if today.month < 12 else 1
+        year = today.year if today.month < 12 else today.year + 1
+        return datetime(year, month, today.day).strftime("%Y-%m-%d")
+
+    # next weekend (Saturday)
+    if "next weekend" in date_text:
+        saturday = 5
+        days_ahead = saturday - today.weekday()
+
+        if days_ahead <= 0:
+            days_ahead += 7
+
+        return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+
+    # next weekday (next friday etc)
+    for day in weekdays:
+        if f"next {day}" in date_text:
+
+            target = weekdays[day]
+            days_ahead = target - today.weekday()
+
+            if days_ahead <= 0:
+                days_ahead += 7
+
+            return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+
+    # this weekday
+    for day in weekdays:
+        if f"this {day}" in date_text:
+
+            target = weekdays[day]
+            days_ahead = target - today.weekday()
+
+            if days_ahead < 0:
+                days_ahead += 7
+
+            return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+
+    return date_text
+
 def detect_time_regex(text: str):
 
     text = text.lower()
@@ -159,7 +239,12 @@ def extract_nlu(text: str) -> dict:
             elif period == "night":
                 parsed["time"] = "19:00"
 
+        # ---------- FIX 3: RELATIVE DATE ----------
+        if parsed["date"]:
+            parsed["date"] = normalize_relative_date(parsed["date"])
+
         return parsed
+    
 
 
     except Exception as e:
