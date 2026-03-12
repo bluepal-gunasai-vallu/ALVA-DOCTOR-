@@ -251,7 +251,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
                     for a in appointments:
 
-                        if a["email"] == email and a["state"] in ["CONFIRMED", "MODIFIED"]:
+                        if a["email"] == email and a["state"] in ["CONFIRMED", "RESCHEDULED"]:
 
                             if a.get("google_event_id"):
                                 try:
@@ -517,10 +517,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
                             update_appointment_datetime(appointment["id"], normalized_datetime)
                             update_google_event_id(appointment["id"], event_id)
-                            update_appointment_status(appointment["id"], "MODIFIED")
+                            update_appointment_status(appointment["id"], "RESCHEDULED")
 
                             state_machine.transition(
-                                "MODIFIED",
+                                "RESCHEDULED",
                                 metadata={"reason": "user_rescheduled"}
                             )
 

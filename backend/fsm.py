@@ -5,7 +5,7 @@ class AppointmentState(str, Enum):
     INQUIRY = "INQUIRY"
     TENTATIVE = "TENTATIVE"
     CONFIRMED = "CONFIRMED"
-    MODIFIED = "MODIFIED"
+    RESCHEDULED = "RESCHEDULED"
     CANCELLED = "CANCELLED"
 
 
@@ -23,8 +23,8 @@ class AppointmentStateMachine:
         valid_transitions = {
             "INQUIRY": ["TENTATIVE", "CONFIRMED"],
             "TENTATIVE": ["CONFIRMED", "CANCELLED"],
-            "CONFIRMED": ["MODIFIED", "CANCELLED"],
-            "MODIFIED": ["CONFIRMED", "CANCELLED"],
+            "CONFIRMED": ["RESCHEDULED", "CANCELLED"],
+            "RESCHEDULED": ["CONFIRMED", "CANCELLED"],
             "CANCELLED": []
         }
 

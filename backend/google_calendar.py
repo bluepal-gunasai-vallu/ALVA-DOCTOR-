@@ -92,16 +92,29 @@ def generate_available_slots(date):
     available = []
 
     for hour in working_hours:
+
         slot_start = f"{date}T{hour:02d}:00:00+05:30"
 
         conflict = False
+
         for busy in busy_times:
             if busy['start'] <= slot_start < busy['end']:
                 conflict = True
                 break
 
         if not conflict:
-            available.append(f"{hour}:00")
+
+            suffix = "am"
+            display_hour = hour
+
+            if hour >= 12:
+                suffix = "pm"
+
+            display_hour = hour % 12
+            if display_hour == 0:
+                display_hour = 12
+
+            available.append(f"{display_hour}{suffix}")
 
     return available
 def delete_event(event_id):
